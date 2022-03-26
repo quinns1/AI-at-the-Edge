@@ -33,7 +33,8 @@ except ImportError:  # pip < 10.0
 from fer_models import model_1, model_1_b, model_2, mobile_net, model_3
 from helpers import plot_history, convert_keras_tflite, gen_confusion_matrix
 from face_detection import HAAR, MTCNN, YOLO_v3, HOG, MMOD_CNN, CVLIB_DNN
-from data import get_fer_2013_data_gens, get_train_val_count, get_ckplus_data_gens
+from data import get_pre_split_data_gens, get_train_val_count, get_non_split_data_gens
+from quantization import PostTrainingQuantization
 
 
 'Ascertain if running on colab or not'
@@ -90,9 +91,9 @@ def train_fer_model(model,  target_classes, img_size, dataset, model_str, loggin
     'Step 1: Get training and validation data generators' 
     logger.debug('Loading data generators, looking for data in directory: {}'.format(data_path)) 
     if dataset == 'FER_2013' or dataset == 'FER_2013+':
-        X_data_gen, y_data_gen = get_fer_2013_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
-    elif dataset == 'CK+':
-        X_data_gen, y_data_gen = get_ckplus_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
+        X_data_gen, y_data_gen = get_pre_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
+    elif dataset == 'CK+' or dataset == 'JAFFE':
+        X_data_gen, y_data_gen = get_non_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
 
 
     
@@ -112,7 +113,7 @@ def train_fer_model(model,  target_classes, img_size, dataset, model_str, loggin
     logger.debug('Facial Emotion Recognition Model Summary')
     logger.debug(short_model_summary)
     
-    model.compile(loss='categorical_crossentropy',optimizer=Adam(learning_rate=lr, decay=1e-6),metrics=['accuracy'])
+    model.compile(loss='categorical_crossentropy',optimizer=Adam(learning_rate=lr, decay=d),metrics=['accuracy'])
     logger.debug('Fitting model')
     logger.debug('Epochs: {}'.format(str(epochs)))
     logger.info('Training callbacks printed below in the format:\nEpoch; Training Accuracy; Training Loss; Validation Accuracy; Validation Loss')
@@ -120,10 +121,10 @@ def train_fer_model(model,  target_classes, img_size, dataset, model_str, loggin
     csv_logger = CSVLogger(logging_filename, append=True, separator=';')        #Log training metrics
     model_info = model.fit(
             X_data_gen,
-            steps_per_epoch=train_count // batch_size, 
+            steps_per_epoch= train_count // batch_size, 
             epochs=epochs,
             validation_data=y_data_gen,
-            validation_steps=val_count // batch_size,
+            validation_steps= val_count // batch_size,
             callbacks=[csv_logger])
     
     'Step 3: Plot accuracy/loss and save weights'
@@ -189,8 +190,7 @@ def single_image_fer(model, image_directory, img_size, emotion_dict, detection_m
         face_detection_classifier = HOG()
     elif detection_method == 'MMOD_CNN':
         face_detection_classifier = MMOD_CNN()
-    elif detection_method == 'CVLIB_DNN':
-        face_detection_classifier = CVLIB_DNN()
+
     
     logger.debug('{} face detection classifier has been instantiated'.format(detection_method))
     logger.debug('Iterating through images in {}'.format(image_directory))
@@ -209,8 +209,7 @@ def single_image_fer(model, image_directory, img_size, emotion_dict, detection_m
             face_locations = face_detection_classifier.get_face_locations(gray_image)
         elif detection_method == 'MTCNN' or detection_method == 'HOG' or detection_method == 'MMOD_CNN':
             face_locations = face_detection_classifier.get_face_locations(img)
-        elif detection_method == 'CVLIB_DNN':
-            face_locations = face_detection_classifier.get_face_locations(img)
+
         print(face_locations)
             
      
@@ -287,6 +286,33 @@ def real_time_fer(model):
 
 
 
+def evaluate_quantization(model, model_str, target_classes, img_size, dataset, batch_size = 64, data_path= '../data/'):
+    
+    logger.info('Evaluating Quantization')
+    logger.debug('Target Classes: {}'.format(str(target_classes)))
+    
+    'Step 1: Get training and validation data generators' 
+    logger.debug('Loading data generators, looking for data in directory: {}'.format(data_path)) 
+    if dataset == 'FER_2013' or dataset == 'FER_2013+':
+        X_data_gen, y_data_gen = get_pre_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
+    elif dataset == 'CK+' or dataset == 'JAFFE':
+        X_data_gen, y_data_gen = get_non_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
+
+
+
+    'Evaluate performance of standard model'
+    
+    results = model.evaluate(X_data_gen, y_data_gen, batch_size=batch_size)
+    
+    print(results)
+    
+    pt_quant = PostTrainingQuantization(model)
+    
+    'Evaluate performance of dynamic range quantized model'
+    
+    
+    dynamic_range_model = pt_quant.dynamic_range_quantization()
+
 
     
 def main():
@@ -298,7 +324,7 @@ def main():
     'Required for training'
     dataset = 'FER_2013+'
     epochs = 100
-    img_size = (64, 64)             #Resise image, this drastically impacts the size of the model
+    img_size = (48, 48)             #Resise image, this drastically impacts the size of the model
     
     
     'The following are required for real-time/single image FER'
@@ -309,10 +335,11 @@ def main():
     
     
     'Parse sys args'
-    options_dict = {1: 'Train FER Model', 2: 'Single Image Facial Emotion Recognition', 3: 'Real-Time Facial Emotion Recognition'}
+    options_dict = {1: 'Train FER Model', 2: 'Single Image Facial Emotion Recognition', 3: 'Real-Time Facial Emotion Recognition',
+                    4: 'Evaluate Quantization'}
     ap = argparse.ArgumentParser()
     ap.add_argument("--option",help="1: Train. 2: Single Image 3: Real-time facial emotion recognition using webcam",
-                    action='store', type=str, required=False, default='1')
+                    action='store', type=str, required=False, default='4')
     option = int(ap.parse_args().option)
     
     
@@ -323,6 +350,8 @@ def main():
         data_path = '../data/fer_2013'
     elif dataset == 'FER_2013+':
         data_path = '../data/fer_2013+'
+    elif dataset == 'JAFFE':
+        data_path = '/home/sq/code/FER_at_the_Edge/data/prepped_jaffe'
 
         
     'Init target classes list/dict'
@@ -335,7 +364,9 @@ def main():
     elif dataset == 'FER_2013+':
         target_classes_dict = {0: "Anger", 1: "Contempt", 2: "Disgust", 3: "Fear", 4: "Happy", 5: "Neutral", 6: "Sadness", 7: "Surprise"}
         target_classes = ["Anger", "Contempt","Disgust", "Fear", "Happy", "Neutral", "Sadness", "Surprise"]
-   
+    elif dataset == 'JAFFE':
+        target_classes_dict =  {0: "Anger", 1: "Disgust", 2: "Fear", 3: "Happy", 4: "Neutral", 5: "Sad", 6: "Surprise"}
+        target_classes = ["Angry", "Disgust","Fear", "Happy", "Neutral","Sad", "Surprise"]
     
    
     model, model_str = model_1_b(input_shape = (img_size[0], img_size[1], 1), target_classes=len(target_classes))
@@ -363,10 +394,12 @@ def main():
     logger.debug('sys.argv: {}'.format(sys.argv))
     logger.info('Option {} chosen: {}'.format(option, options_dict[option]))
         
-    if option == 2 or option == 3:
+    if option == 2 or option == 3 or option == 4:
         logger.info('Loading Model: {}'.format(load_model_weights))
-        model.load_weights(load_model_weights)
-        # model = tf.keras.models.load_model(r'../trained_models/model_1_b_FER_2013_100_64_48x48_model.h5')
+        # model.load_weights(load_model_weights)
+        model = tf.keras.models.load_model(r'../trained_models/model_1_b_FER_2013+_100_64_48x48_model.h5')
+        
+        
         
     if option == 1:
         train_fer_model(model, target_classes, img_size, dataset, model_str, logging_filename, data_path=data_path, epochs=epochs)
@@ -374,8 +407,8 @@ def main():
         single_image_fer(model, img_directory, img_size, target_classes_dict, detection_method=detection_method)
     elif option == 3:
         real_time_fer(logging, model)
-    else:
-        # train_face_detection_model()
+    elif option == 4:
+        evaluate_quantization(model, model_str, target_classes, img_size, dataset, data_path=data_path)
         pass
         
     
