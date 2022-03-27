@@ -24,6 +24,8 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import CSVLogger
 import logging
 import datetime
+import pathlib
+import tempfile
 try:
     from pip._internal.operations import freeze
 except ImportError:  # pip < 10.0
@@ -31,10 +33,11 @@ except ImportError:  # pip < 10.0
 
 'User Imports'
 from fer_models import model_1, model_1_b, model_2, mobile_net, model_3
-from helpers import plot_history, convert_keras_tflite, gen_confusion_matrix
+from helpers import plot_history, convert_keras_tflite, gen_confusion_matrix, evaluate_model, get_file_size, SIZE_UNIT
 from face_detection import HAAR, MTCNN, YOLO_v3, HOG, MMOD_CNN, CVLIB_DNN
 from data import get_pre_split_data_gens, get_train_val_count, get_non_split_data_gens
-from quantization import PostTrainingQuantization
+from quantization import PostTrainingQuantization, quantization_aware_model
+from pruning import Pruning
 
 
 'Ascertain if running on colab or not'
@@ -50,7 +53,8 @@ cv2.ocl.setUseOpenCL(False)
 
 
 
-def train_fer_model(model,  target_classes, img_size, dataset, model_str, logging_filename, data_path=r'./data/', 
+def train_fer_model(model,  target_classes, img_size, dataset, model_str, logging_filename, 
+                    Train_data_gen, Test_data_gen,  t_v_count, data_path=r'./data/', 
                     epochs = 50, batch_size = 64, 
                     lr = 0.0001, d = 1e-6):
     """
@@ -82,19 +86,13 @@ def train_fer_model(model,  target_classes, img_size, dataset, model_str, loggin
     
     
     
-
+    # train_count = t_v_count[0]
+    # val_count = t_v_count[1]
 
 
     logger.info('Train FER Model')
     logger.debug('Target Classes: {}'.format(str(target_classes)))
     
-    'Step 1: Get training and validation data generators' 
-    logger.debug('Loading data generators, looking for data in directory: {}'.format(data_path)) 
-    if dataset == 'FER_2013' or dataset == 'FER_2013+':
-        X_data_gen, y_data_gen = get_pre_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
-    elif dataset == 'CK+' or dataset == 'JAFFE':
-        X_data_gen, y_data_gen = get_non_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
-
 
     
     train_count, val_count = get_train_val_count(data_path, dataset) 
@@ -120,10 +118,10 @@ def train_fer_model(model,  target_classes, img_size, dataset, model_str, loggin
     
     csv_logger = CSVLogger(logging_filename, append=True, separator=';')        #Log training metrics
     model_info = model.fit(
-            X_data_gen,
+            Train_data_gen,
             steps_per_epoch= train_count // batch_size, 
             epochs=epochs,
-            validation_data=y_data_gen,
+            validation_data=Test_data_gen,
             validation_steps= val_count // batch_size,
             callbacks=[csv_logger])
     
@@ -286,35 +284,144 @@ def real_time_fer(model):
 
 
 
-def evaluate_quantization(model, model_str, target_classes, img_size, dataset, batch_size = 64, data_path= '../data/'):
-    
-    logger.info('Evaluating Quantization')
-    logger.debug('Target Classes: {}'.format(str(target_classes)))
-    
-    'Step 1: Get training and validation data generators' 
-    logger.debug('Loading data generators, looking for data in directory: {}'.format(data_path)) 
-    if dataset == 'FER_2013' or dataset == 'FER_2013+':
-        X_data_gen, y_data_gen = get_pre_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
-    elif dataset == 'CK+' or dataset == 'JAFFE':
-        X_data_gen, y_data_gen = get_non_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
 
+    
+    
+    
+    
+    
+def evaluate_post_training_quantization(model, Test_data_gen, t_v_count, load_model_path):
+    
+    
 
-
-    'Evaluate performance of standard model'
-    
-    results = model.evaluate(X_data_gen, y_data_gen, batch_size=batch_size)
-    
-    print(results)
-    
     pt_quant = PostTrainingQuantization(model)
+    logger.debug('Instatiated Post Training Quantization object')
     
-    'Evaluate performance of dynamic range quantized model'
+    
+    'Baseline Model Evaluation'
+    logger.info('Evaluating Baseline Model performance')
+    baseline_model_accuracy, baseline_model_avg_inference_time = evaluate_model(model, Test_data_gen, t_v_count)
+    baseline_model_size = get_file_size(load_model_path, SIZE_UNIT.MB)
+    logger.info("Model Size: {}MB".format(round(baseline_model_size, 2)))
+    logger.info('Model Accuracy: {}%'.format(round(100*baseline_model_accuracy, 2)))
+    logger.info("Average Inference Time: {}ms".format(round(baseline_model_avg_inference_time, 2)))
     
     
+    
+
+    'Dynamic Range Quantization'
     dynamic_range_model = pt_quant.dynamic_range_quantization()
+    logger.debug('Created dynamic range tflite model')
+    _, dynamic_range_model_file = tempfile.mkstemp('.h5')
+    logger.debug('Writing dynamically quantized tflite to file: {}'.format(str(dynamic_range_model_file)))
+    
+    with open(dynamic_range_model_file, 'wb') as f:
+        f.write(dynamic_range_model)
+
+    logger.debug('Creating interpretor from {}'.format(str(dynamic_range_model_file)))
+    interpreter = tf.lite.Interpreter(model_path=str(dynamic_range_model_file))
+    logger.info('Evaluating Dynamic Range Quantized interpretor performance')
+    dynamic_range_model_accuracy, dynamic_range_avg_inference_time = evaluate_model(interpreter, Test_data_gen, t_v_count)
+    dynamic_range_model_size = get_file_size(dynamic_range_model_file, SIZE_UNIT.MB)
+    
+    logger.info("Model Size: {}MB".format(round(dynamic_range_model_size, 2)))
+    logger.info('Model Accuracy: {}%'.format(round(100*dynamic_range_model_accuracy, 2)))
+    logger.info("Average Inference Time: {}ms".format(round(dynamic_range_avg_inference_time, 2)))
+
+
+    'Float16 Quantization'    
+    float16_quant_model = pt_quant.float16_quantization()
+    logger.debug('Created float16 quantized tflite model')
+    _, float16_quant_model_file = tempfile.mkstemp('.h5')
+    logger.debug('Writing float16 quantized tflite to file: {}'.format(str(float16_quant_model_file)))
+    
+    with open(float16_quant_model_file, 'wb') as f:
+        f.write(float16_quant_model)
+
+    logger.debug('Creating interpretor from {}'.format(str(float16_quant_model_file)))
+    interpreter = tf.lite.Interpreter(model_path=str(float16_quant_model_file))
+    logger.info('Evaluating FLOAT16 Quantized interpretor performance')
+    float16_model_accuracy, float16_avg_inference_time = evaluate_model(interpreter, Test_data_gen, t_v_count)
+    float16_model_size = get_file_size(float16_quant_model_file, SIZE_UNIT.MB)
+    
+    logger.info("Model Size: {}MB".format(round(float16_model_size, 2)))
+    logger.info('Model Accuracy: {}%'.format(round(100*float16_model_accuracy, 2)))
+    logger.info("Average Inference Time: {}ms".format(round(float16_avg_inference_time, 2)))
+        
+    
+    'Int8 Quantization'
+    int8_quant_model = pt_quant.int8_quantization()
+    logger.debug('Created int8 quantized tflite model')
+    _, int8_quant_model_file = tempfile.mkstemp('.h5')
+    logger.debug('Writing int8 quantizedt flite to file: {}'.format(str(int8_quant_model_file)))
+    
+    with open(int8_quant_model_file, 'wb') as f:
+        f.write(int8_quant_model)
+
+    logger.debug('Creating interpretor from {}'.format(str(int8_quant_model_file)))
+    interpreter = tf.lite.Interpreter(model_path=str(int8_quant_model_file))
+    logger.info('Evaluating INT8 Quantized interpretor performance')
+    int8_model_accuracy, int8_avg_inference_time = evaluate_model(interpreter, Test_data_gen, t_v_count)
+    int8_model_size = get_file_size(int8_quant_model_file, SIZE_UNIT.MB)
+    
+    logger.info("Model Size: {}MB".format(round(int8_model_size, 2)))
+    logger.info('Model Accuracy: {}%'.format(round(100*int8_model_accuracy, 2)))
+    logger.info("Average Inference Time: {}ms".format(round(int8_avg_inference_time, 2)))
+    
+    
+
 
 
     
+def evaluate_quantization(model, Train_data_gen, Test_data_gen, t_v_count, load_model_path,
+                          lr = 0.0001, d = 1e-6,  epochs = 50, batch_size=64, quant_aware_model = False):
+    
+    train_count, val_count = t_v_count
+    logger.info('Evaluating Quantization')
+    
+    logger.info('Evaluating quantization using basic model')
+    evaluate_post_training_quantization(model, Test_data_gen, t_v_count, load_model_path)
+    
+    # if not quant_aware_model:
+    #     quant_aware_model = quantization_aware_model(model)
+    #     # quant_aware_model.compile(loss='categorical_crossentropy',optimizer=Adam(learning_rate=lr, decay=d),metrics=['accuracy'])
+        
+    #     print(quant_aware_model.summary())
+    #     logger.debug('Fitting model')
+    #     logger.debug('Epochs: {}'.format(str(epochs)))
+        
+    #     model_info = model.fit(Train_data_gen,
+    #                             steps_per_epoch= train_count // batch_size,
+    #                             batch_size = batch_size,
+    #                             epochs=1,
+    #                             validation_data=Test_data_gen,
+    #                             validation_steps= val_count // batch_size)
+
+    
+    
+    
+    # logger.info('Evaluating quantization on quantization aware model')    
+    # evaluate_post_training_quantization(model, Test_data_gen, t_v_count, load_model_path)
+    
+    
+    
+    
+def evaluate_pruning(model, Train_data_gen, Test_data_gen, t_v_count):
+    
+    # train_count = t_v_count[0]
+    # val_count = t_v_count[1]
+
+    _, baseline_model_accuracy = model.evaluate(
+         y_data_gen, verbose=0)
+
+    prune = Pruning(model)
+    
+    low_magnitude_accuracy, low_magnitude_model = prune.low_magnitude_pruning(Train_data_gen, Test_data_gen, t_v_count)
+    
+    # prune.strip_pruning()
+    
+
+        
 def main():
     
     
@@ -324,21 +431,23 @@ def main():
     'Required for training'
     dataset = 'FER_2013+'
     epochs = 100
-    img_size = (48, 48)             #Resise image, this drastically impacts the size of the model
+    img_size = (48, 48)             
+    batch_size = 64
     
     
     'The following are required for real-time/single image FER'
-    load_model_weights = r'../trained_models/model_1_b_FER_2013+_100_64_64x64_model_weights.h5'        
+    # load_model_weights = r'../trained_models/model_1_b_FER_2013+_100_64_48x48_model_weights.h5'  
+    load_model_path = '../trained_models/model_1_b_FER_2013+_100_64_48x48_model.h5'    
     img_directory = r'../data/test_images'
     # img_directory = r'C:\Code\GitHub\FER at the Edge\data\fddb\2003\01\16\big'
     detection_method = 'HOG'
-    
+        
     
     'Parse sys args'
     options_dict = {1: 'Train FER Model', 2: 'Single Image Facial Emotion Recognition', 3: 'Real-Time Facial Emotion Recognition',
-                    4: 'Evaluate Quantization'}
+                    4: 'Evaluate Quantization', 5: 'Evaluate Pruning'}
     ap = argparse.ArgumentParser()
-    ap.add_argument("--option",help="1: Train. 2: Single Image 3: Real-time facial emotion recognition using webcam",
+    ap.add_argument("--option",help="1: Train. 2: Single Image 3: Real-time facial emotion recognition using webcam 4: Evaluate Quantization 5: Evaluate Pruning",
                     action='store', type=str, required=False, default='4')
     option = int(ap.parse_args().option)
     
@@ -351,7 +460,7 @@ def main():
     elif dataset == 'FER_2013+':
         data_path = '../data/fer_2013+'
     elif dataset == 'JAFFE':
-        data_path = '/home/sq/code/FER_at_the_Edge/data/prepped_jaffe'
+        data_path = '../data/prepped_jaffe'
 
         
     'Init target classes list/dict'
@@ -368,10 +477,22 @@ def main():
         target_classes_dict =  {0: "Anger", 1: "Disgust", 2: "Fear", 3: "Happy", 4: "Neutral", 5: "Sad", 6: "Surprise"}
         target_classes = ["Angry", "Disgust","Fear", "Happy", "Neutral","Sad", "Surprise"]
     
-   
-    model, model_str = model_1_b(input_shape = (img_size[0], img_size[1], 1), target_classes=len(target_classes))
-   
+    
+    if dataset == 'FER_2013' or dataset == 'FER_2013+':
+        Train_data_gen, Test_data_gen = get_pre_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
+    elif dataset == 'CK+' or dataset == 'JAFFE':
+        Train_data_gen, Test_data_gen = get_non_split_data_gens(data_path=data_path, batch_size=batch_size, img_size=img_size) 
+    
+    t_v_count = get_train_val_count(data_path, dataset)             # (train_count, val_count)
 
+
+    'Loading Model'
+    model, model_str = model_1_b(input_shape = (img_size[0], img_size[1], 1), target_classes=len(target_classes))
+    try:
+        model.load_weights(load_model_weights)
+    except:    
+        model = tf.keras.models.load_model(load_model_path)
+        
     
     'Configure logging handler'
     logging_directory = '../logging/'
@@ -379,41 +500,39 @@ def main():
         os.makedirs(logging_directory)
     logging_filename = logging_directory+str(option)+'_'+str(epochs)+dataset+model_str+'_edge_fer_'+str(datetime.datetime.now().strftime("%Y%m%d_%H-%M-%S")+'.log') 
     logger.propagate = False
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     file_handler = logging.FileHandler(logging_filename)
     formatter    = logging.Formatter('%(asctime)s : %(levelname)s : %(name)s : %(message)s')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-    
     logger.info('Running...')
+    logger.debug('sys.argv: {}'.format(sys.argv))
+    logger.debug('Loading image data generators, looking for data in directory: {}'.format(data_path)) 
+    logger.debug('Model: {}'.format(model_str)) 
+    logger.info('Option {} chosen: {}'.format(option, options_dict[option]))
     logger.debug('Dependancies')                    
     x = freeze.freeze()                                                                                                                                                                              
     for p in x:
         logger.debug(p)
         
-    logger.debug('sys.argv: {}'.format(sys.argv))
-    logger.info('Option {} chosen: {}'.format(option, options_dict[option]))
-        
-    if option == 2 or option == 3 or option == 4:
-        logger.info('Loading Model: {}'.format(load_model_weights))
-        # model.load_weights(load_model_weights)
-        model = tf.keras.models.load_model(r'../trained_models/model_1_b_FER_2013+_100_64_48x48_model.h5')
-        
-        
+
+
         
     if option == 1:
-        train_fer_model(model, target_classes, img_size, dataset, model_str, logging_filename, data_path=data_path, epochs=epochs)
+        train_fer_model(model, target_classes, img_size, dataset, model_str, logging_filename, Train_data_gen, Test_data_gen, t_v_count,
+                        data_path=data_path, epochs=epochs, batch_size=batch_size)
     elif option == 2:
         single_image_fer(model, img_directory, img_size, target_classes_dict, detection_method=detection_method)
     elif option == 3:
         real_time_fer(logging, model)
     elif option == 4:
-        evaluate_quantization(model, model_str, target_classes, img_size, dataset, data_path=data_path)
-        pass
+        evaluate_quantization(model, Train_data_gen, Test_data_gen, t_v_count, load_model_path)
+    elif option == 5:
+        evaluate_pruning(model, Train_data_gen, Test_data_gen, t_v_count)
         
     
     
-            
+
 
     
     
