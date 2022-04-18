@@ -14,8 +14,12 @@ import logging
 import os
 import copy
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import LabelBinarizer
+from sklearn.metrics import roc_curve, auc, roc_auc_score
 import numpy as np
 import cv2
+import tempfile
+import pandas as pd
 
 
 
@@ -59,15 +63,12 @@ def plot_history(model_history, plot_name='ModelHistory.png'):
     plt.show()
         
 
-
-
-
-
-def gen_confusion_matrix(model, val_data_gen, target_names, batch_size=64, num_of_test_samples = 7178):
+def gen_confusion_matrix(model, val_data_gen, target_names, tv_count, batch_size=64):
     
-
+    _, val_count = tv_count
+    
     val_data_gen.reset()
-    Y_pred = model.predict(val_data_gen, num_of_test_samples // batch_size+1)
+    Y_pred = model.predict(val_data_gen, val_count // batch_size+1)
     y_pred = np.argmax(Y_pred, axis=1)
     
     return confusion_matrix(val_data_gen.classes,y_pred), classification_report(val_data_gen.classes, y_pred, target_names=target_names)
@@ -90,7 +91,7 @@ def convert_keras_tflite(model):
 
 
 
-def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 48), batch_size = 64):
+def evaluate_model(model_interpretor, params, Test_data_gen):
     """
     Evaluate model performance on Test_data_gen. Record inference times and return accuracy & avg inference time
 
@@ -100,12 +101,12 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
         model to be evaluated
     Test_data_gen : tf.imagedatagenerator
         Validation images
-    tv_count : TUPLE
-        (test images count, validation images count)
-    img_size : TUPLE, optional
-        Input image size. The default is (48, 48).
-    batch_size : INT, optional
-        Training batch size. The default is 64.
+    params: dict
+        Parameters 
+        params['img_size'] = (x,y) input image dimensions
+        params['batch_size']
+        params['t_v_count'] = Training validation count (training images, validations images)
+
 
     Returns
     -------
@@ -115,8 +116,13 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
         Average inference time in ms.
 
     """
+    
+    
 
-    _, val_count = tv_count
+    
+    
+    Test_data_gen.reset()
+    _, val_count = params['t_v_count'] 
     images = list()
     labels = list()
     predicted_labels = list()  
@@ -132,10 +138,10 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
     except:
         interpreter = model_interpretor
         input_index = interpreter.get_input_details()[0]["index"]
-        output_index = interpreter.get_output_details()[0]["index"]
-        input_details = interpreter.get_input_details()
+        # output_index = interpreter.get_output_details()[0]["index"]
+        # input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
-        input_shape = input_details[0]['shape']
+        # input_shape = input_details[0]['shape']
         interpreter.allocate_tensors()
 
     
@@ -155,7 +161,7 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
                 label = labes[i]
                 images.append(img)
                 labels.append(label)
-                input_tensor = np.expand_dims(np.expand_dims(cv2.resize(img , img_size), -1), 0).astype(np.float32)
+                input_tensor = np.expand_dims(np.expand_dims(cv2.resize(img , params['img_size']), -1), 0).astype(np.float32)
                 interpreter.set_tensor(input_index, input_tensor)                
                 interpreter.invoke()
                 output_data = interpreter.get_tensor(output_details[0]['index'])
@@ -167,7 +173,7 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
                 inference_time = (time.time() - start_time)*1000         #Inference time in ms
                 inference_times.append(inference_time)
                 
-            count += batch_size
+            count += params['batch_size'] 
             print('Evaluating interpretor on Validation Images, Percent Complete: {}%'.format(round(100*count/val_count, 2)))
             
             
@@ -188,7 +194,7 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
                 label = labes[i]
                 images.append(img)
                 labels.append(label)
-                prepped_image = np.expand_dims(np.expand_dims(cv2.resize(img , img_size), -1), 0)
+                prepped_image = np.expand_dims(np.expand_dims(cv2.resize(img , params['img_size'] ), -1), 0)
                 output = model.predict(prepped_image)
                 predicted_i = np.argmax(output)
                 predicted_class = copy.deepcopy(prediction_place_holder)
@@ -197,9 +203,11 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
                 inference_time = (time.time() - start_time)*1000         #Inference time in ms
                 inference_times.append(inference_time)
 
-            count += batch_size
+            count += params['batch_size'] 
             print('Evaluating model on Validation Images, Percent Complete: {}%'.format(round(100*count/val_count, 2)))
 
+
+    
 
     average_inference = np.average(np.array(inference_times))
 
@@ -215,6 +223,18 @@ def evaluate_model(model_interpretor, Test_data_gen, tv_count, img_size = (48, 4
 
 
 
+def get_model_size(model):
+    
+    _, file_name = tempfile.mkstemp('.h5')
+    
+    try:
+        with open(file_name, 'wb') as f:
+            f.write(model)
+    except TypeError:
+        model.save(file_name)
+    
+    return get_file_size(file_name, size_type=SIZE_UNIT.MB)
+
 
 
 class SIZE_UNIT(enum.Enum):
@@ -224,7 +244,22 @@ class SIZE_UNIT(enum.Enum):
     GB = 4
     
 def convert_unit(size_in_bytes, unit):
-    """ Convert the size from bytes to other units like KB, MB or GB"""
+    """
+    Convert the size from bytes to other units like KB, MB or GB
+
+    Parameters
+    ----------
+    size_in_bytes : FLOAT32
+        size
+    unit : GB, MB, B, KB
+        
+
+    Returns
+    -------
+    TYPE
+        Size in unit.
+
+    """
     if unit == SIZE_UNIT.KB:
         return size_in_bytes/1024
     elif unit == SIZE_UNIT.MB:
@@ -238,8 +273,90 @@ def convert_unit(size_in_bytes, unit):
 
 
 def get_file_size(file_name, size_type = SIZE_UNIT.BYTES ):
-    """ Get file in size in given unit like KB, MB or GB"""
+    """
+    Return file size
+
+    Parameters
+    ----------
+    file_name : STRING
+        File name and path
+    size_type : SIZEUNIT, optional
+        Bytes, MB, KB. The default is SIZE_UNIT.BYTES.
+
+    Returns
+    -------
+    TYPE : FLOAT32
+        Size of file.
+
+    """
+    
     size = os.path.getsize(file_name)
     return convert_unit(size, size_type)
      
+
+def get_model_summary(model):
+    """
+    Returns model summary string for logging.
+    
+    Parameters
+    ----------
+    model : tf Sequential Model
+
+    Returns
+    -------
+    short_model_summary : STRING
+        String representation of model summary for logging.
+
+    """
+    
+    
+    stringlist = []
+    model.summary(print_fn=lambda x: stringlist.append(x))
+    short_model_summary = "\n".join(stringlist)
+    return short_model_summary
+
+
+class ResultsRec():
+    
+    def __init__(self, params):
+        
+        self.model = params['model_str']
+        self.out_file = params['results_filename']
+        columns = ['Model', 'Quantization', 'Pruning', 'Model Size', 'Average Inference Time', 'Accuracy', 'Notes']
+        self.df = pd.DataFrame(columns=columns)
+        
+    
+    
+    def add_res(self, quant, prune, ms, inf, acc, notes='NA'):
+        
+        temp_df = pd.DataFrame({'Model': [self.model],
+                            'Quantization': [quant],
+                            'Pruning': [prune],
+                            'Model Size': [ms],
+                            'Average Inference Time': [inf],
+                            'Accuracy': [acc],
+                            'Notes': [notes]})
+        
+        self.df  = pd.concat([self.df, temp_df], ignore_index = False, axis = 0)
+
+
+    def save_res(self):
+        
+        self.df.to_csv(self.out_file)
+        
+        print(self.df)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
