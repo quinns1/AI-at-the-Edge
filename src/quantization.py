@@ -23,6 +23,7 @@ class PostTrainingQuantization():
         'Dynamically quantize float32 weights'
         
         converter = tf.lite.TFLiteConverter.from_keras_model(self.model)
+        # converter.experimental_enable_resource_variable = True
         converter.optimizations = [tf.lite.Optimize.DEFAULT]
         quantized_model = converter.convert()
         
@@ -56,13 +57,31 @@ class PostTrainingQuantization():
     
 
 def apply_quantization_to_applicable_layers(layer):
+    """
+    Annotate densely connected and conv2d layers.
+    """
+    
     if isinstance(layer, tf.keras.layers.Dense) or isinstance(layer, tf.keras.layers.Conv2D):
         return tfmot.quantization.keras.quantize_annotate_layer(layer)
     return layer
 
 
 
-def quantization_aware_model(model):
+def get_quantization_aware_model(model):
+    """
+    Get quantization aware model
+
+    Parameters
+    ----------
+    model : KERAS MODEL OBJECT
+        
+
+    Returns
+    -------
+    quant_aware_model :  KERAS MODEL OBJECT
+
+
+    """
     
 
     annotated_model = tf.keras.models.clone_model(
@@ -76,6 +95,7 @@ def quantization_aware_model(model):
 
 
 
-
+    
+  
 
 

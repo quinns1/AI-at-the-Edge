@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def get_pre_split_data_gens(data_path = r'../data', batch_size = 64, img_size = (64, 64)):
     """
-    Ensure FER-2013 dataset is stored in data subdirectory, if not modify train_dir and val_dir paths
+    Get data generators if training and validation data is already split into seperate folders
     
 
     Parameters
@@ -35,7 +35,7 @@ def get_pre_split_data_gens(data_path = r'../data', batch_size = 64, img_size = 
     y_test_gen : IMAGE DATA GENERATOR 
         Test data generator.
     """
-    # logger = logging.getLogger(__name__) 
+
     train_dir = data_path + r'/train'
     val_dir = data_path + r'/test'
     
@@ -43,8 +43,7 @@ def get_pre_split_data_gens(data_path = r'../data', batch_size = 64, img_size = 
                                 horizontal_flip=True, zoom_range = [0.8, 1.2])
     
 
-    # X_gen = ImageDataGenerator(rescale=1./255)
-    
+
     y_gen = ImageDataGenerator(rescale=1./255)
     
     X_train_gen = X_gen.flow_from_directory(
@@ -69,6 +68,22 @@ def get_pre_split_data_gens(data_path = r'../data', batch_size = 64, img_size = 
 
 
 def get_non_split_data_gens(data_path = r'../data', batch_size = 64, img_size = (64, 64)):
+    """
+    Get image data generators if data is not split into seperate folders
+
+    Parameters
+    ----------
+    batch_size : INT, optional
+        Batch Size. The default is 64.
+
+    Returns
+    -------
+    X_train_gen : IMAGE DATA GENERATOR 
+        Training data generator
+    y_test_gen : IMAGE DATA GENERATOR 
+        Test data generator.
+
+    """
     
 
     
@@ -101,6 +116,24 @@ def get_non_split_data_gens(data_path = r'../data', batch_size = 64, img_size = 
   
     
 def get_train_val_count(directory, dataset):
+    """
+    Return count of training and validation images
+
+    Parameters
+    ----------
+    directory : STRING
+        Path of train/val images
+    dataset : STRING
+        Dataset used
+
+    Returns
+    -------
+    train_count : INT
+        
+    val_count : INT
+
+
+    """
     
 
     train_count = val_count = 0
@@ -131,8 +164,19 @@ def get_train_val_count(directory, dataset):
 
 
 def prep_jaffe(data_path):
-    
-    'Create output folder'
+    """
+    Prep JAFFE dataset. Split into directories based on emotion
+
+    Parameters
+    ----------
+    data_path : STRING
+
+
+    Returns
+    -------
+    None.
+
+    """
     
     new_path = data_path+'/prepped_jaffe'
     
