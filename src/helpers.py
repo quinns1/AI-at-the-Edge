@@ -64,6 +64,28 @@ def plot_history(model_history, plot_name='ModelHistory.png'):
         
 
 def gen_confusion_matrix(model, val_data_gen, target_names, tv_count, batch_size=64):
+    """
+    Return confusion matrix and classification report for logging
+
+    Parameters
+    ----------
+    model : KERAS MODEL OBJECT
+
+    val_data_gen : IMAGE DATA GEN
+
+    target_names : LIST
+        Target Classes
+    tv_count : TUPLE
+       Train/validation count
+    batch_size : INT, optional
+         The default is 64.
+
+    Returns
+    -------
+    TYPE   TUPLE of STRINGS
+        (Confusion Matrix, Classification report)
+
+    """
     
     _, val_count = tv_count
     
@@ -80,9 +102,7 @@ def convert_keras_tflite(model):
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     tflite_model = converter.convert()
     
-    # with open(r'../trained_models/model.tflite', 'wb') as f:
-    #   f.write(tflite_model)
-    
+
     return tflite_model
 
 
@@ -118,9 +138,6 @@ def evaluate_model(model_interpretor, params, Test_data_gen):
     """
     
     
-
-    
-    
     Test_data_gen.reset()
     _, val_count = params['t_v_count'] 
     images = list()
@@ -138,10 +155,7 @@ def evaluate_model(model_interpretor, params, Test_data_gen):
     except:
         interpreter = model_interpretor
         input_index = interpreter.get_input_details()[0]["index"]
-        # output_index = interpreter.get_output_details()[0]["index"]
-        # input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
-        # input_shape = input_details[0]['shape']
         interpreter.allocate_tensors()
 
     
@@ -205,10 +219,7 @@ def evaluate_model(model_interpretor, params, Test_data_gen):
 
             count += params['batch_size'] 
             print('Evaluating model on Validation Images, Percent Complete: {}%'.format(round(100*count/val_count, 2)))
-
-
-    
-
+            
     average_inference = np.average(np.array(inference_times))
 
     accurate_count = 0
@@ -218,12 +229,24 @@ def evaluate_model(model_interpretor, params, Test_data_gen):
     accuracy = accurate_count * 1.0 / len(predicted_labels)
 
 
-
     return accuracy, average_inference
 
 
 
 def get_model_size(model):
+    """
+    Return model size, save first then compute file size
+
+    Parameters
+    ----------
+    model : Keras or tflite model
+
+    Returns
+    -------
+    FLOAT32
+        Model size
+
+    """
     
     _, file_name = tempfile.mkstemp('.h5')
     
@@ -317,6 +340,9 @@ def get_model_summary(model):
 
 
 class ResultsRec():
+    """
+    Class for recording model size, inference time and accuracy. Used for evaluating model compression techniques
+    """
     
     def __init__(self, params):
         
@@ -350,7 +376,51 @@ class ResultsRec():
 
 
 
+def get_prediction(model_interpretor, img, params):
+    """
+    Make prediction with model or tflite model
 
+    Parameters
+    ----------
+    model_interpretor : TYPE
+        DESCRIPTION.
+    img : Image
+        
+    params : DICT
+        Parameters
+    Returns
+    -------
+    prediction : List
+        Softmax prediction 
+
+    """
+
+    try:
+        'Discern if model_interpretor is keras model or tflite interpretor'
+        model_interpretor.summary()
+        model = model_interpretor
+        interpreter = False
+    except:
+        interpreter = model_interpretor
+        input_index = interpreter.get_input_details()[0]["index"]
+        output_details = interpreter.get_output_details()
+        interpreter.allocate_tensors()
+
+
+    if interpreter:
+
+        input_tensor = np.expand_dims(np.expand_dims(np.reshape(img , params['img_size']), -1), 0).astype(np.float32)
+        interpreter.set_tensor(input_index, input_tensor)
+        interpreter.invoke()
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        prediction = np.squeeze(output_data)
+
+    else:
+
+        prepped_image = np.expand_dims(np.expand_dims(cv2.resize(img , params['img_size'] ), -1), 0)
+        prediction = model.predict(prepped_image)
+
+    return prediction
 
 
 
