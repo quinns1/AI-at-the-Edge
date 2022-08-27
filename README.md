@@ -9,10 +9,23 @@ High level ML architecture is as follows
 
 Data
 ---------------------------------------------
-Models were trained with FER-2013+ dataset. CK+, JAFFE & FER-2013 are also supported for evaluation. Ensure relevant dataset is \
-available in ../data/ directory.
+Models were trained with FER-2013+ dataset. CK+, JAFFE & FER-2013 are also supported for evaluation. 
+Ensure relevant dataset is available in ../data/ directory.
 
 
+Model
+---------------------------------------------
+CNN based model architecture is as follows
+![alt text](https://github.com/quinns1/FER-at-the-Edge/blob/main/images/model_1_structure.drawio.png?raw=true)
+
+
+Model Compression
+---------------------------------------------
+
+
+Model Running
+---------------------------------------------
+![alt text](https://github.com/quinns1/FER-at-the-Edge/blob/main/images/deployed_edge_fer.png?raw=true)
 
 
 Directions
