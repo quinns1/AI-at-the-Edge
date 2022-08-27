@@ -12,12 +12,6 @@ import math
 import shutil
 
 
-
-
-logger = logging.getLogger(__name__) 
-
-
-
 def get_pre_split_data_gens(data_path = r'../data', batch_size = 64, img_size = (64, 64)):
     """
     Get data generators if training and validation data is already split into seperate folders

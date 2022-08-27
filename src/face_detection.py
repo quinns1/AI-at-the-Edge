@@ -10,7 +10,7 @@ from mtcnn import MTCNN
 from tensorflow import keras
 import dlib
 import logging
-import cvlib as cv
+# import cvlib as cv
 
 
 
@@ -19,28 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 
-
-class CVLIB_DNN():
-    
-    def __init__(self):
-        pass
-
-
-    def get_face_locations(self, gray_scale_image):
-        return cv.detect_face(gray_scale_image)[0]
-
-
-
 class HAAR():
     
     def __init__(self, haar_cascade):
         
-        self.face_classifier = cv2.CascadeClassifier(haar_cascade)
+        # self.face_classifier = cv2.CascadeClassifier(haar_cascade)
+        self.face_classifier = cv2.CascadeClassifier(cv2.data.haarcascades + haar_cascade) 
 
 
     def get_face_locations(self, gray_scale_image, scale_factor = 1.3, min_neighbors = 5):
-        return self.face_classifier.detectMultiScale(gray_scale_image, scaleFactor = scale_factor, minNeighbors = min_neighbors)
-
+        return self.face_classifier.detectMultiScale(gray_scale_image, scaleFactor=scale_factor,minNeighbors=min_neighbors)
 
 
 
@@ -76,7 +64,7 @@ class HOG():
         
     def get_face_locations(self, rgb_image):
         rectangles = self.face_classifier(rgb_image)
-        
+
         face_locations = []
         
         for rect in rectangles:
@@ -103,23 +91,21 @@ class HOG():
 class MMOD_CNN():
     
     def __init__(self):
-        logger.critical('failing in get_face_locations')
-        self.face_classifier = dlib.cnn_face_detection_model_v1('model')
+        # logger.critical('failing in get_face_locations')
+        self.face_classifier = dlib.cnn_face_detection_model_v1('../trained_models/mmod_human_face_detector.dat')
     
     
     
     def get_face_locations(self, rgb_image):
         rectangles = self.face_classifier(rgb_image)
-        
-        
-        
+
         face_locations = []
         
-        for rect in rectangles:
-            startX = rect.left()
-            startY = rect.top()
-            endX = rect.right()
-            endY = rect.bottom()
+        for rect_class in rectangles:
+            startX = rect_class.rect.left()
+            startY = rect_class.rect.top()
+            endX = rect_class.rect.right()
+            endY = rect_class.rect.bottom()
             # ensure the bounding box coordinates fall within the spatial
             # dimensions of the image
             startX = max(0, startX)
@@ -135,3 +121,11 @@ class MMOD_CNN():
         return face_locations
 
 
+# class CVLIB_DNN():
+    
+#     def __init__(self):
+#         pass
+
+
+#     def get_face_locations(self, gray_scale_image):
+#         return cv.detect_face(gray_scale_image)[0]
