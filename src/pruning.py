@@ -18,121 +18,13 @@ import zipfile
 
 
 class Pruning():
+    """
+    Object for creating low magnitude pruned models
+    """
     
     def __init__(self, model):
         
-        self.model = model
-       
-        
-       
-        
-
-    def alternate_layer_pruning(self, params, X_data_gen, y_data_gen, epochs = 5, 
-                              dense_sparsity=0.90, conv_sparsity=.60):
-        
-        if not dense_sparsity and not conv_sparsity:
-            return self.model
-        
-        
-        train_count = params['t_v_count'][0]
-        val_count = params['t_v_count'][1]        
-        prune_low_magnitude = tfmot.sparsity.keras.prune_low_magnitude
-        logdir = tempfile.mkdtemp()
-        
-        
-        if dense_sparsity:
-        
-            model_for_pruning = tf.keras.models.clone_model(self.model, clone_function=apply_pruning_to_dense , )
-                        
-            'Get final step'
-            end_step = np.ceil(train_count / params['batch_size']).astype(np.int32) * epochs
-            
-            # pruning_params = {'block_size': [1, 16]}
-            # model_for_pruning = tfmot.sparsity.keras.prune_low_magnitude(base_model, **pruning_params)
-    
-            pruning_params = {
-                  'pruning_schedule': tfmot.sparsity.keras.ConstantSparsity(target_sparsity=dense_sparsity, 
-                                                                            begin_step=0, 
-                                                                            end_step=end_step)
-            }
-    
-    
-            model_for_pruning = prune_low_magnitude(self.model, **pruning_params)
-            model_for_pruning.compile(optimizer='adam',
-                          loss='categorical_crossentropy',
-                          metrics=['accuracy'])
-    
-            
-            callbacks = [tfmot.sparsity.keras.UpdatePruningStep(), tfmot.sparsity.keras.PruningSummaries(log_dir=logdir), ]
-            model_for_pruning.fit(
-                    X_data_gen,
-                    steps_per_epoch= train_count // params['batch_size'], 
-                    epochs=epochs,
-                    validation_data=y_data_gen,
-                    validation_steps= val_count // params['batch_size'],
-                    callbacks=callbacks)
-            
-            dense_pruned_model = tfmot.sparsity.keras.strip_pruning(model_for_pruning)
-            
-        
-        else:
-            dense_pruned_model = self.model
-        
-        if conv_sparsity:
-            model_for_pruning = tf.keras.models.clone_model(dense_pruned_model, clone_function=apply_pruning_to_conv,)
-                        
-            'Get final step'
-            end_step = np.ceil(train_count / params['batch_size']).astype(np.int32) * epochs
-            
-            # pruning_params = {'block_size': [1, 16]}
-            # model_for_pruning = tfmot.sparsity.keras.prune_low_magnitude(base_model, **pruning_params)
-    
-            pruning_params = {
-                  'pruning_schedule': tfmot.sparsity.keras.ConstantSparsity(target_sparsity=conv_sparsity, 
-                                                                            begin_step=0, 
-                                                                            end_step=end_step)
-            }
-    
-            
-            model_for_pruning = prune_low_magnitude(dense_pruned_model, **pruning_params)
-            
-            'Fine Tuning'
-            epochs = 10
-            opt = tf.keras.optimizers.Adam(learning_rate=1e-5)
-            model_for_pruning.compile(optimizer=opt,
-                          loss='categorical_crossentropy',
-                          metrics=['accuracy'])
-    
-            
-            # callbacks = [tfmot.sparsity.keras.UpdatePruningStep(), tfmot.sparsity.keras.PruningSummaries(log_dir=logdir), ]
-            model_for_pruning.fit(
-                    X_data_gen,
-                    steps_per_epoch= train_count // params['batch_size'], 
-                    epochs=epochs,
-                    validation_data=y_data_gen,
-                    validation_steps= val_count // params['batch_size'],
-                    callbacks=callbacks)
-            
-            pruned_model = tfmot.sparsity.keras.strip_pruning(model_for_pruning)
-        else:
-            pruned_model = dense_pruned_model
-            
-        
-
-        
-        'Strip pruning wrapper'
-        stripped_model = tfmot.sparsity.keras.strip_pruning(pruned_model)
-        sparsity = get_model_weights_sparsity(stripped_model)
-
-        
-        return stripped_model, sparsity 
-        
-    
-    
-
-    # 'pruning schedule to be learning rate???'
-    
-         
+        self.model = model      
         
         
     def low_magnitude_pruning(self, params, X_data_gen, y_data_gen, epochs = 2, 
@@ -146,9 +38,6 @@ class Pruning():
         
         'Get final step'
         end_step = np.ceil(train_count / params['batch_size']).astype(np.int32) * epochs
-        
-        # pruning_params = {'block_size': [1, 16]}
-        # model_for_pruning = tfmot.sparsity.keras.prune_low_magnitude(base_model, **pruning_params)
         
         'Define model for pruning schedule'
         if constant_sparsity:
@@ -181,10 +70,7 @@ class Pruning():
                 validation_data=y_data_gen,
                 validation_steps= val_count // params['batch_size'],
                 callbacks=callbacks)
-        
-        
-        # with tfmot.sparsity.keras.prune_scope():
-        #     model_for_pruning = tf.keras.models.load_model(model_for_pruning)
+
                 
         'Strip pruning wrapper'
         stripped_model = tfmot.sparsity.keras.strip_pruning(model_for_pruning)
@@ -225,3 +111,54 @@ def apply_pruning_to_conv(layer):
         return tfmot.sparsity.keras.prune_low_magnitude(layer)
     return layer
           
+
+
+
+def custom_prune(model, params, X_data_gen, y_data_gen, results ):
+    model_for_pruning = tfmot.sparsity.keras.prune_low_magnitude(model)
+    
+    
+    loss = tf.keras.losses.categorical_crossentropy
+    optimizer = tf.keras.optimizers.Adam()
+    log_dir = tempfile.mkdtemp()
+    unused_arg = -1
+    epochs = 2
+    batches = 1 
+    
+    count = 0
+    for tup in X_data_gen:
+        'Get training data'
+        if count >= 28386/64:
+            break
+        imgs = tup[0]
+        labes = tup[1]
+        count +=1
+    
+    
+    # Non-boilerplate.
+    model_for_pruning.optimizer = optimizer
+    step_callback = tfmot.sparsity.keras.UpdatePruningStep()
+    step_callback.set_model(model_for_pruning)
+    log_callback = tfmot.sparsity.keras.PruningSummaries(log_dir=log_dir) # Log sparsity and other metrics in Tensorboard.
+    log_callback.set_model(model_for_pruning)
+    
+    step_callback.on_train_begin() # run pruning callback
+    for _ in range(epochs):
+        log_callback.on_epoch_begin(epoch=unused_arg) # run pruning callback
+        for _ in range(batches):
+            step_callback.on_train_batch_begin(batch=unused_arg) # run pruning callback
+            
+            with tf.GradientTape() as tape:
+                logits = model_for_pruning(imgs, training=True)
+                loss_value = loss(labes, logits)
+                grads = tape.gradient(loss_value, model_for_pruning.trainable_variables)
+                optimizer.apply_gradients(zip(grads, model_for_pruning.trainable_variables))
+          
+        step_callback.on_epoch_end(batch=unused_arg) # run pruning callback
+        
+    
+
+    return model_for_pruning
+
+
+

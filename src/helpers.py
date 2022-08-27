@@ -14,8 +14,6 @@ import logging
 import os
 import copy
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.preprocessing import LabelBinarizer
-from sklearn.metrics import roc_curve, auc, roc_auc_score
 import numpy as np
 import cv2
 import tempfile
@@ -408,7 +406,6 @@ def get_prediction(model_interpretor, img, params):
 
 
     if interpreter:
-
         input_tensor = np.expand_dims(np.expand_dims(np.reshape(img , params['img_size']), -1), 0).astype(np.float32)
         interpreter.set_tensor(input_index, input_tensor)
         interpreter.invoke()
@@ -416,8 +413,10 @@ def get_prediction(model_interpretor, img, params):
         prediction = np.squeeze(output_data)
 
     else:
-
-        prepped_image = np.expand_dims(np.expand_dims(cv2.resize(img , params['img_size'] ), -1), 0)
+        try:
+            prepped_image = np.expand_dims(np.expand_dims(cv2.resize(img , params['img_size'] ), -1), 0)
+        except:
+            pass
         prediction = model.predict(prepped_image)
 
     return prediction

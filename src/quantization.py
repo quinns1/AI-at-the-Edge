@@ -79,8 +79,6 @@ def get_quantization_aware_model(model):
     Returns
     -------
     quant_aware_model :  KERAS MODEL OBJECT
-
-
     """
     
 
@@ -88,7 +86,6 @@ def get_quantization_aware_model(model):
             model,
             clone_function=apply_quantization_to_applicable_layers,
         )
-    
     quant_aware_model = tfmot.quantization.keras.quantize_apply(annotated_model)   
     
     return quant_aware_model
