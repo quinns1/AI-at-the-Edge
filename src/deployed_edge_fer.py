@@ -15,6 +15,7 @@ import numpy as np
 import argparse
 import tensorflow as tf
 from data import get_pre_split_data_gens, get_train_val_count, get_non_split_data_gens
+from face_detection import HAAR
 
 
 
@@ -44,10 +45,6 @@ def evaluate_model(model_interpretor, params, Test_data_gen):
 
     """
     
-    
-
-    
-    
     Test_data_gen.reset()
     _, val_count = params['t_v_count'] 
     images = list()
@@ -65,10 +62,7 @@ def evaluate_model(model_interpretor, params, Test_data_gen):
     except:
         interpreter = model_interpretor
         input_index = interpreter.get_input_details()[0]["index"]
-        # output_index = interpreter.get_output_details()[0]["index"]
-        # input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
-        # input_shape = input_details[0]['shape']
         interpreter.allocate_tensors()
 
     
@@ -150,21 +144,28 @@ def evaluate_model(model_interpretor, params, Test_data_gen):
 
 
 
-
-class HAAR():
-    
-    def __init__(self, haar_cascade):
-        
-        self.face_classifier = cv2.CascadeClassifier(haar_cascade)
-
-
-    def get_face_locations(self, gray_scale_image, scale_factor = 1.3, min_neighbors = 5):
-        return self.face_classifier.detectMultiScale(gray_scale_image, scaleFactor = scale_factor, minNeighbors = min_neighbors)
-    
-    
     
     
 def get_prediction(model_interpretor, img, params):
+    """
+    Return softmax output array of
+
+    Parameters
+    ----------
+    model_interpretor : TF Model or TFLITE interpretor
+        Model/Interpretor to make prediction
+    img : NP Array
+        Input image of cropped face.
+    params: dict
+        Parameters 
+        params['img_size'] = (x,y) input image dimensions
+
+    Returns
+    -------
+    prediction : NP Array
+        Prediction Softmax Output
+
+    """
     
     try:
         'Discern if model_interpretor is keras model or tflite interpretor'
@@ -197,53 +198,97 @@ def get_prediction(model_interpretor, img, params):
     
     
 def real_time_edge_fer(model, params):
+    """
+    Run real-time FER using 'model'. Print timings and predicted emotion to console
+
+    Parameters
+    ----------
+    model : TF Model or TFLITE interpretor
+        Model/Interpretor to make prediction
+    params: dict
+        Parameters 
+        params['img_size'] = (x,y) input image dimensions.
+
+    Returns
+    -------
+    None.
+
+    """
     
+    camera = cv2.VideoCapture(0)
+    detect_times = list()
+    fer_times = list()
+    total_times = list()
+    if params['detection_method'] == 'HAAR':
+        face_cascade=cv2.CascadeClassifier("haarcascade_frontalface_default.xml") 
+    face_cascade=cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml") 
     
-    haar_cascade = '../trained_models/haarcascade_frontalface_default.xml'
-    face_detection_classifier = HAAR(haar_cascade=haar_cascade)
-
-
-    camera = cv2.VideoCaptur(0)
-    
-    while True:
+    while True:    
+        start_time = time.time()
+        ret, frame = camera.read()   
+        gray_img=cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)  
+        t = time.time()
+        faces=face_cascade.detectMultiScale(gray_img, scaleFactor=1.3,minNeighbors=5)
+        get_face_locations_time = time.time() - t
+        t = time.time()
+        if len(faces) >= 1:
+            detect_times.append(get_face_locations_time)
+        try:
+            print('Number of faces detected: {} Average time to detect faces: {}'.format(str(len(faces)), sum(detect_times)/len(detect_times)))
+        except ZeroDivisionError:
+            pass
         
-        ret, frame = camera.read()
-        
-        
-        gray_image = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        for x, y, w, h in faces:
 
-        face_locations = face_detection_classifier.get_face_locations(gray_image)
-
-        print(face_locations)
-
-        for (x, y, w, h) in face_locations:
-            roi_gray = gray_image[y:y + h, x:x + w]
-            cropped_img = np.expand_dims(np.expand_dims(cv2.resize(roi_gray, params['img_size']), -1), 0)            
+            roi_gray = gray_img[y:y + h, x:x + w] 
+            cropped_img = cv2.resize(roi_gray, params['img_size'])
             prediction = get_prediction(model, cropped_img, params)
+            print(params['target_classes_dict'][int(np.argmax(prediction))])
             cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 255, 255), 1)
-            cv2.putText(frame, params['emotion_dict'][int(np.argmax(prediction))], (x, y-15), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
+            cv2.putText(frame, params['target_classes_dict'][int(np.argmax(prediction))], (x, y-15), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2, cv2.LINE_AA)
     
-    
- 
-   
-        
-
+        fer_time = time.time()-t
+        if len(faces) >= 1:
+            fer_times.append(fer_time)
+        try:
+            print('Average FER time: ', sum(fer_times)/len(fer_times))
+        except ZeroDivisionError:
+            pass
         
         cv2.imshow('Real-time edge-FER', frame)  
-            
-    
+        total_time = time.time()-start_time
+        if len(faces) >= 1:
+            total_times.append(total_time)
+        try:
+            print('Total time:', sum(total_times)/len(total_times))
+        except ZeroDivisionError:
+            pass
+        print('FER Count: ', str(len(total_times)))
+        
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        
     cv2.waitKey(0) 
     cv2.destroyAllWindows()
+    
 
 
 def main():
+    """
+    Option 1: Run real-time FER
+    Option 2: Evaluate model/interpretor on validation images
+
+    Returns
+    -------
+    None.
+
+    """
     
     params = dict()
     params['img_size'] = (48,48)  
     params['dataset'] = 'FER_2013+'  
     params['batch_size'] = 64
-    params['detection_method'] = 'HOG'
-    
+    params['detection_method'] = 'HAAR'
     
     'Init target classes list/dict'
     if params['dataset'] == 'FER_2013':
@@ -259,13 +304,27 @@ def main():
         params['target_classes_dict'] =  {0: "Anger", 1: "Disgust", 2: "Fear", 3: "Happy", 4: "Neutral", 5: "Sad", 6: "Surprise"}
         params['target_classes']  = ["Angry", "Disgust","Fear", "Happy", "Neutral","Sad", "Surprise"]
     
-    
     'Parse sys args'
     options_dict = {1: 'Real-time edge-FER', 2: 'Evaluate model on edge device'}
     ap = argparse.ArgumentParser()
-    ap.add_argument("--option",help="1: Real-time edge-FER. 2: Evaluate model on edge device using validation images",
-                    action='store', type=str, required=False, default='1')
+    ap.add_argument("--option",help="1: {}. 2: {}".format(options_dict[1], options_dict[2]),
+                    action='store', type=str, required=False, default='2')
     option = int(ap.parse_args().option)
+    
+    'Load model'
+    model_interpretor = tf.keras.models.load_model('../trained_models/model1_struc_pruned_structured_pruning_100.h5')
+    # model_interpretor = tf.lite.Interpreter(model_path='../trained_models/model1_2_4_struct_pruning_float16_quant.tflite')
+    
+    if params['dataset'] == 'CK+':
+        params['data_path'] = '../data/CK+_Complete'
+    elif params['dataset']  == 'FER_2013':
+        params['data_path']  = '../data/fer_2013'
+    elif params['dataset']  == 'FER_2013+':
+        params['data_path']  = '../data/fer_2013+'
+    elif params['dataset']  == 'JAFFE':
+        params['data_path']  = '../data/prepped_jaffe'
+        
+    params['t_v_count'] = get_train_val_count(params['data_path'] , params['dataset'])
     
     if option == 2:
         'Get data image data generators'
@@ -273,18 +332,10 @@ def main():
             Train_data_gen, Test_data_gen = get_pre_split_data_gens(data_path=params['data_path'] , batch_size=params['batch_size'], img_size=params['img_size']) 
         elif params['dataset']  == 'CK+' or params['dataset']  == 'JAFFE':
             Train_data_gen, Test_data_gen = get_non_split_data_gens(data_path=params['data_path'] , batch_size=params['batch_size'], img_size=params['img_size'] ) 
-        
-        params['t_v_count'] = get_train_val_count(params['data_path'] , params['dataset'])             # (train_count, val_count)
-             
-
-    
-    model_interpretor = tf.keras.models_load('model1_FER_2013+_100_64_48x48_model.h5')
-    
-    
-    
+            
     if option == 1:
-        'Option 1: (default) real-time edge-FER'
-        real_time_edge_fer(model_interpretor)
+        'Option 1: (Default) real-time edge-FER'
+        real_time_edge_fer(model_interpretor, params)
     elif option == 2:
         'Option 2: Evaluate Validation generator on edge device.'
         evaluate_model(model_interpretor, params, Test_data_gen)
@@ -297,6 +348,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
 
