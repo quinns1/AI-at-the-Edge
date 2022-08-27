@@ -2,23 +2,28 @@
 Facial Emotion Recognition at the Edge
 ---------------------------------------------
 
-Coding is in progress and incomplete
+High level ML architecture is as follows
+
+![alt text](https://github.com/quinns1/FER-at-the-Edge/blob/main/images/ML_Architecture.png?raw=true)
+
+
+Data
+---------------------------------------------
+Models were trained with FER-2013+ dataset. CK+, JAFFE & FER-2013 are also supported for evaluation. Ensure relevant dataset is \
+available in ../data/ directory.
+
+
+
+
+Directions
 ---------------------------------------------
 
+To evaluate various permutations of model compression techniques run on edge_fer.py with the following option flags
+* 1: Train model (defined in fer_models.py).
+* 2: Evaluate quantization (post training and quantization aware training).
+* 3: Evaluate pruning (alternate sparsity, 2/4 structured sparsity, sparsity ramp & pruning w/ quantization).
 
-
-
-Facial emotion recognition implemented in this project is divided into a three phases:
-
-**Phase 1: Face detection**
-
-We investigate the various face detection methods including HAAR & MTCNN
-
-**Phase 2: Facial emotion recognition**
-
-We investigate various facial emotion recognition models; compare, contrast and build upon. 
-
-**Phase 3: Edge implementation**
-
-We look at implementing edge computing techniques such as quantization and pruning to enable the model to run on an edge device in realtime at an acceptable FPS rate.
+To run on edge device, clone repo and run deployed_edge_fer.py with the follwoing option flags:
+* 1: Run on edge-FER model.
+* 2: Evaluate model performance on validation images.
 
