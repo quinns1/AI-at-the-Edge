@@ -6,26 +6,15 @@ High level ML architecture is as follows
 
 ![alt text](https://github.com/quinns1/FER-at-the-Edge/blob/main/images/ML_Architecture.png?raw=true)
 
+The goal of this project was to evaluate various permuations of model compression techniques enabling FER at the edge.
+Models were evaluated in under model size, top-1 accuracy and latency. Results show 2 by 4 structured pruning
+combined with Float16 quantization yield the best reduction in model size and latency with minimal impact to accuracy.
+
 
 Data
 ---------------------------------------------
 Models were trained with FER-2013+ dataset. CK+, JAFFE & FER-2013 are also supported for evaluation. 
 Ensure relevant dataset is available in ../data/ directory.
-
-
-Model
----------------------------------------------
-CNN based model architecture is as follows
-![alt text](https://github.com/quinns1/FER-at-the-Edge/blob/main/images/model_1_structure.drawio.png?raw=true)
-
-
-Model Compression
----------------------------------------------
-
-
-Model Running
----------------------------------------------
-![alt text](https://github.com/quinns1/FER-at-the-Edge/blob/main/images/deployed_edge_fer.png?raw=true)
 
 
 Directions
